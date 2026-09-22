@@ -135,6 +135,27 @@ def make_button(text, on_release=None):
     return b
 
 
+class ColoredToggle(ToggleButton):
+    """Toggle con color solido: azul cuando esta activo (state=down)."""
+
+    ACTIVE = (0.239, 0.494, 1.0, 1)
+    INACTIVE = (0.2, 0.22, 0.25, 1)
+
+    def __init__(self, **kw):
+        kw.setdefault("font_name", FONT)
+        kw.setdefault("background_normal", "")
+        kw.setdefault("background_down", "")
+        kw.setdefault("color", TEXT_HEX)
+        super().__init__(**kw)
+        self.bind(state=self._sync_color)
+        self._sync_color()
+
+    def _sync_color(self, *a):
+        down = self.state == "down"
+        self.background_color = self.ACTIVE if down else self.INACTIVE
+        self.color = (1, 1, 1, 1) if down else TEXT_HEX
+
+
 def card():
     return Card()
 
@@ -378,9 +399,7 @@ class MainScreen(Screen):
                  ("WiFi", "wifi"), ("Más", "mas")]
         self.nav_btns = {}
         for text, key in names:
-            b = ToggleButton(text=text, group="nav", font_name=FONT,
-                             background_normal="", background_down=(0.239, 0.494, 1.0, 1),
-                             background_color=(0.2, 0.22, 0.25, 1), color=TEXT_HEX)
+            b = ColoredToggle(text=text, group="nav", font_name=FONT)
             b.bind(on_release=lambda _b, k=key: self.go_tab(k))
             nav.add_widget(b)
             self.nav_btns[key] = b
@@ -687,12 +706,8 @@ class WifiScreen(Screen):
         self.msg = sub_label("")
         root.add_widget(self.msg)
         bands = BoxLayout(orientation="horizontal", size_hint_y=None, height=dp(48), spacing=dp(8))
-        self.b24 = ToggleButton(text="2.4G", group="band", font_name=FONT,
-                                background_normal="", background_down=(0.239, 0.494, 1.0, 1),
-                                background_color=(0.2, 0.22, 0.25, 1), color=TEXT_HEX)
-        self.b5 = ToggleButton(text="5G", group="band", font_name=FONT,
-                               background_normal="", background_down=(0.239, 0.494, 1.0, 1),
-                               background_color=(0.2, 0.22, 0.25, 1), color=TEXT_HEX)
+        self.b24 = ColoredToggle(text="2.4G", group="band", font_name=FONT)
+        self.b5 = ColoredToggle(text="5G", group="band", font_name=FONT)
         self.b24.state = "down"
         self.b24.bind(on_release=self._set_band24)
         self.b5.bind(on_release=self._set_band5)
