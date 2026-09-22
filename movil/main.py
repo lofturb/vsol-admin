@@ -117,9 +117,11 @@ class Worker(object):
                 result = fn()
                 Clock.schedule_once(lambda dt: on_done(result), 0)
             except V.LoginError as e:
-                Clock.schedule_once(lambda dt: (on_error or self._log)(str(e)), 0)
+                msg = str(e)
+                Clock.schedule_once(lambda dt: (on_error or self._log)(msg), 0)
             except Exception as e:
-                Clock.schedule_once(lambda dt: (on_error or self._log)(repr(e)), 0)
+                msg = repr(e)
+                Clock.schedule_once(lambda dt: (on_error or self._log)(msg), 0)
 
         self._log = lambda msg: None
         threading.Thread(target=run, daemon=True).start()
