@@ -1,0 +1,24 @@
+[app]
+title = VSOL Admin
+package.name = vsoladmin
+package.domain = org.vsol
+source.dir = .
+source.include_exts = py,png,jpg,kv
+source.exclude_dirs = tests, bin, .buildozer
+version = 0.3.0
+requirements = python3,kivy==2.3.0
+orientation = portrait
+fullscreen = 0
+android.permissions = INTERNET
+android.archs = arm64-v8a
+android.api = 33
+android.minapi = 21
+android.ndk = 25b
+android.sdk = 34
+android.extra_manifest_application_arguments = android:usesCleartextTraffic="true"
+icon.filename = icon.png
+presplash.filename = icon.png
+
+[buildozer]
+log_level = 2
+warn_on_root = 1
