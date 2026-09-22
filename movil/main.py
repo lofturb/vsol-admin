@@ -6,10 +6,13 @@ Reutiliza vrouter.py (misma capa de red que la version de escritorio).
 
 import json
 import os
+import sys
 import threading
+import traceback
 import webbrowser
 
 from kivy.app import App
+from kivy.base import ExceptionHandler, ExceptionManager
 from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.graphics import Color, Rectangle
@@ -34,6 +37,50 @@ SUB_HEX = (0.55, 0.58, 0.63, 1)
 FONT = "Roboto"
 
 CONFIG_FILE = "vsol_config.json"
+LOG_FILE = "vsol_errors.log"
+
+
+# ---------------------------------------------------------------------------
+# Reporte de errores en pantalla (depuracion en el movil, sin adb)
+# ---------------------------------------------------------------------------
+class ErrorReporter(ExceptionHandler):
+    """Muestra en pantalla cualquier excepcion que Kivy propague."""
+
+    def handle_exception(self, inst):
+        try:
+            msg = "".join(traceback.format_exception(*sys.exc_info()))
+        except Exception:
+            msg = repr(inst)
+        _report_error(msg)
+        return ExceptionManager.PASS
+
+
+def _report_error(msg):
+    try:
+        sys.stderr.write(msg + "\n")
+    except Exception:
+        pass
+    try:
+        app = App.get_running_app()
+        if app is not None:
+            app.log_error(msg)
+            if app.root is not None:
+                Clock.schedule_once(lambda dt: app.show_error(msg), 0)
+    except Exception:
+        pass
+
+
+def _thread_hook(args):
+    _report_error("".join(traceback.format_exception(
+        args.exc_type, args.exc_value, args.exc_traceback)))
+
+
+threading.excepthook = _thread_hook
+
+
+def _excepthook(t, v, tb):
+    _report_error("".join(traceback.format_exception(t, v, tb)))
+    sys.__excepthook__(t, v, tb)
 
 
 def norm_mac(m):
@@ -129,6 +176,23 @@ class VsolApp(App):
     title = "VSOL Admin"
 
     def build(self):
+        try:
+            return self._build()
+        except BaseException:
+            msg = "".join(traceback.format_exception(*sys.exc_info()))
+            self.log_error(msg)
+            Clock.schedule_once(lambda dt: self.show_error(msg), 0)
+            return self._err_root(msg)
+
+    def _err_root(self, msg):
+        box = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(6))
+        box.add_widget(Label(text="Error al iniciar VSOL Admin:",
+                             color=(1, 0.4, 0.4, 1), size_hint_y=None, height=dp(30),
+                             font_name=FONT))
+        box.add_widget(TextInput(text=msg, readonly=False, font_size=dp(9), font_name=FONT))
+        return box
+
+    def _build(self):
         Window.clearcolor = BG_DARK
         self.api = None
         self.names = {}
@@ -143,6 +207,28 @@ class VsolApp(App):
         self.sm.add_widget(self.login_screen)
         self.sm.add_widget(self.main_screen)
         return self.sm
+
+    def log_error(self, msg):
+        try:
+            with open(os.path.join(self.user_data_dir, LOG_FILE), "a",
+                      encoding="utf-8") as f:
+                f.write(msg + "\n")
+        except OSError:
+            pass
+
+    def show_error(self, msg):
+        content = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(8))
+        content.add_widget(Label(text="Ocurrio un error:", color=(1, 0.4, 0.4, 1),
+                                 size_hint_y=None, height=dp(26)))
+        ti = TextInput(text=msg, readonly=False, font_size=dp(9), font_name=FONT)
+        content.add_widget(ti)
+        close = Button(text="Cerrar", size_hint_y=None, height=dp(44),
+                       font_name=FONT, background_color=(0.239, 0.494, 1.0, 1))
+        content.add_widget(close)
+        pop = Popup(title="VSOL Admin - Error", content=content,
+                    size_hint=(0.95, 0.92))
+        close.bind(on_release=pop.dismiss)
+        pop.open()
 
     def on_start(self):
         if self.cfg.get("host"):
@@ -755,4 +841,6 @@ class MoreScreen(Screen):
 
 
 if __name__ == "__main__":
+    sys.excepthook = _excepthook
+    ExceptionManager.add_handler(ErrorReporter())
     VsolApp().run()
