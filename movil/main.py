@@ -178,9 +178,9 @@ def field(hint="", **kw):
     ti = TextInput(background_normal="", background_active="",
                    hint_text=hint, **kw)
     grp = InstructionGroup()
-    with grp:
-        Color(*FIELD)
-        rect = RoundedRectangle(radius=[R, R, R, R], pos=ti.pos, size=ti.size)
+    grp.add(Color(*FIELD))
+    rect = RoundedRectangle(radius=[R, R, R, R], pos=ti.pos, size=ti.size)
+    grp.add(rect)
     ti.canvas.before.insert(0, grp)
 
     def _redraw(*a):
@@ -460,9 +460,19 @@ class VsolApp(App):
         pop.open()
 
     def on_start(self):
-        self.login_screen.remember.active = bool(self.cfg.get("save_creds", True))
-        if self.cfg.get("host"):
-            self.login_screen.fill(self.cfg)
+        try:
+            cfg = self.cfg
+        except AttributeError:
+            cfg = {"host": "", "user": "admin", "password": "", "names": {},
+                   "save_creds": True}
+        ls = getattr(self, "login_screen", None)
+        if ls is not None and getattr(ls, "remember", None) is not None:
+            try:
+                ls.remember.active = bool(cfg.get("save_creds", True))
+                if cfg.get("host"):
+                    ls.fill(cfg)
+            except Exception:
+                pass
 
     # ---- config ----
     def load_cfg(self):
@@ -794,9 +804,9 @@ class StatBox(Card):
     def __init__(self, label, **kw):
         super().__init__(orientation="vertical", spacing=dp(2), **kw)
         self.add_widget(Label(text=label, color=SUB, font_name=FONT,
-                              font_size=dp(11)))
+                              font_size=dp(11), size_hint_y=None, height=dp(18)))
         self.val = Label(text="-", bold=True, color=TEXT, font_name=FONT,
-                         font_size=dp(20))
+                         font_size=dp(20), size_hint_y=None, height=dp(34))
         self.add_widget(self.val)
 
 
