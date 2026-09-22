@@ -414,7 +414,6 @@ class MainScreen(Screen):
             b.state = "down" if k == key else "normal"
 
     def on_logged_in(self, info):
-        self.estado.set_device(info)
         self.refresh_all()
 
     def refresh_all(self):
