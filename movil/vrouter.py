@@ -105,6 +105,11 @@ class RouterAPI(object):
             tail = body[idx + len("LOGINED_ERROR_"):].strip()
             code = tail.split("=")[0] if "=" in tail else tail
             rest = tail.split("=", 1)[1].strip() if "=" in tail else ""
+            if code == "3" and rest.isdigit():
+                raise LoginError(
+                    "Contrasena incorrecta varias veces: espera %s segundos "
+                    "antes de reintentar (comprueba la contrasena)."
+                    % rest)
             raise LoginError("LOGINED_ERROR_%s%s" % (code, ("=%s" % rest) if rest else ""))
 
     def logout(self):
