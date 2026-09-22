@@ -6,7 +6,7 @@ source.dir = .
 source.include_exts = py,png,jpg,kv
 source.exclude_dirs = tests, bin, .buildozer
 version = 0.3.0
-requirements = python3,kivy==2.3.0
+requirements = python3==3.11.9,hostpython3==3.11.9,kivy==2.3.0
 orientation = portrait
 fullscreen = 0
 android.permissions = INTERNET
