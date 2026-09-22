@@ -43,7 +43,9 @@ TEXT = (0.94, 0.95, 0.97, 1.0)
 SUB = (0.60, 0.63, 0.68, 1.0)
 DANGER = (0.86, 0.33, 0.32, 1.0)
 OK = (0.24, 0.78, 0.44, 1.0)
+HINT = (0.72, 0.75, 0.79, 1.0)            # texto de placeholder (mas claro que SUB)
 R = dp(12)                                # radio de esquinas
+RF = dp(16)                               # radio de esquinas de los inputs
 
 FONT = "Roboto"
 CONFIG_FILE = "vsol_config.json"
@@ -150,6 +152,11 @@ class Rounded(BoxLayout):
 
 class Card(Rounded):
     def __init__(self, **kw):
+        # Si no se indica orientacion, las tarjetas apilan en vertical. Sin
+        # esto, Card() heredaba el horizontal de BoxLayout y las 4 filas se
+        # colocaban una al lado de otra con minimum_height = max(fila):
+        # texto superpuesto en las tarjetas de Estado.
+        kw.setdefault("orientation", "vertical")
         kw.setdefault("padding", [dp(12), dp(10)])
         kw.setdefault("spacing", dp(4))
         super().__init__(bg=CARD, **kw)
@@ -163,23 +170,26 @@ class Card(Rounded):
 def field(hint="", **kw):
     """TextInput estilo app (fondo oscuro redondeado).
 
-    IMPORTANTE: el relleno se INSERTA al principio de canvas.before. El
-    TextInput de Kivy dibuja el texto con el color GL que deja el ultimo
-    Color de canvas.before (ver style.kv), asi que appender aqui rompe el
-    color de las letras (texto oscuro sobre fondo oscuro).
+    IMPORTANTE:
+    - El relleno se INSERTA al principio de canvas.before. El TextInput de
+      Kivy dibuja el texto con el color GL que deja el ultimo Color de
+      canvas.before (ver style.kv), asi que appender aqui rompe el color de
+      las letras (texto oscuro sobre fondo oscuro).
+    - background_color=(0,0,0,0) para anular la textura blanca por defecto que
+      Kivy pinta aunque background_normal="" (cuadro blanco sobre el fondo).
     """
     kw.setdefault("size_hint_y", None)
     kw.setdefault("height", dp(48))
     kw.setdefault("font_name", FONT)
-    kw.setdefault("hint_text_color", SUB)
-    kw.setdefault("foreground_color", TEXT)
+    kw.setdefault("hint_text_color", HINT)
+    kw.setdefault("foreground_color", (0.97, 0.98, 1.0, 1.0))
     kw.setdefault("cursor_color", ACCENT)
     kw.setdefault("padding", [dp(12), dp(12), dp(12), dp(12)])
     ti = TextInput(background_normal="", background_active="",
-                   hint_text=hint, **kw)
+                   background_color=(0, 0, 0, 0), hint_text=hint, **kw)
     grp = InstructionGroup()
     grp.add(Color(*FIELD))
-    rect = RoundedRectangle(radius=[R, R, R, R], pos=ti.pos, size=ti.size)
+    rect = RoundedRectangle(radius=[RF, RF, RF, RF], pos=ti.pos, size=ti.size)
     grp.add(rect)
     ti.canvas.before.insert(0, grp)
 
@@ -198,7 +208,7 @@ def accented_btn(text, on_release=None, bg=ACCENT, **kw):
     kw.setdefault("font_name", FONT)
     kw.setdefault("font_size", dp(14))
     b = Button(text=text, background_normal="", background_down="",
-               color=(1, 1, 1, 1), **kw)
+               background_color=(0, 0, 0, 0), color=(1, 1, 1, 1), **kw)
     with b.canvas.before:
         b._col = Color(*bg)
         b._rect = RoundedRectangle(radius=[R, R, R, R])
@@ -671,7 +681,7 @@ class NavToggle(ToggleButton):
     def __init__(self, **kw):
         kw.setdefault("font_name", FONT)
         super().__init__(background_normal="", background_down="",
-                         color=SUB, **kw)
+                         background_color=(0, 0, 0, 0), color=SUB, **kw)
         with self.canvas.before:
             self._col = Color(*CARD)
             self._rect = RoundedRectangle(radius=[dp(10), dp(10), dp(10), dp(10)])
