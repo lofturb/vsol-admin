@@ -512,6 +512,10 @@ class VsolApp(App):
 
         def work():
             api = V.RouterAPI(host, user, password)
+            try:
+                api.logout()
+            except Exception:
+                pass
             api.login()
             info = api.get_device_info()
             return api, info

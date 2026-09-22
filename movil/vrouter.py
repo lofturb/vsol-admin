@@ -96,6 +96,10 @@ class RouterAPI(object):
         body = self.post("/boaform/admin/formLogin",
                          {"username": self.user, "password": self.password},
                          relogin=False)
+        if "ANOTHER_USER_LOGINED" in body:
+            raise LoginError("ANOTHER_USER_LOGINED: el router ya tiene una sesion "
+                             "abierta (solo admite una). Cierra la otra app/pagina "
+                             "o reinicia el router.")
         if "LOGINED_ERROR" in body:
             idx = body.find("LOGINED_ERROR_")
             tail = body[idx + len("LOGINED_ERROR_"):].strip()
