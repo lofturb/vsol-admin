@@ -26,7 +26,8 @@ jobs:
       - name: Instalar buildozer
         run: |
           sudo python3 -m pip install --upgrade pip
-          sudo python3 -m pip install cython==0.29.36 buildozer==1.5.0
+          sudo python3 -m pip install cython==0.29.36
+          sudo python3 -m pip install git+https://github.com/kivy/buildozer.git
 
       - name: Compilar APK
         working-directory: movil

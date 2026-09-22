@@ -11,13 +11,13 @@ orientation = portrait
 fullscreen = 0
 android.permissions = INTERNET
 android.archs = arm64-v8a
-android.api = 27
+android.api = 33
 android.minapi = 21
 android.ndk = 25b
 android.sdk = 34
 android.build_tools = 34.0.0
 android.accept_sdk_license = True
-android.extra_manifest_application_arguments =
+android.extra_manifest_application_arguments = app_arguments.xml
 icon.filename = icon.png
 presplash.filename = icon.png
 
