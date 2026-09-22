@@ -2,6 +2,8 @@
 """VSOL Admin movil - app Kivy para administrar el router VSOL V2804AX.
 
 Reutiliza vrouter.py (misma capa de red que la version de escritorio).
+Rediseno: tema oscuro moderno, tarjetas redondeadas, dashboard en Estado,
+buscador y nombres locales en Dispositivos, ojito para claves WiFi.
 """
 
 import json
@@ -15,7 +17,7 @@ from kivy.app import App
 from kivy.base import ExceptionHandler, ExceptionManager
 from kivy.clock import Clock
 from kivy.core.window import Window
-from kivy.graphics import Color, Rectangle
+from kivy.graphics import Color, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
@@ -28,14 +30,21 @@ from kivy.uix.togglebutton import ToggleButton
 
 import vrouter as V
 
-ACCENT_HEX = (0.239, 0.494, 1.0, 1)      # #3d7eff
-BG_DARK = (0.117, 0.121, 0.133, 1)       # #1e1f22
-BG_CARD = (0.16, 0.165, 0.18, 1)
-TEXT_HEX = (0.93, 0.94, 0.96, 1)
-SUB_HEX = (0.55, 0.58, 0.63, 1)
+# ---------------------------------------------------------------------------
+# Tema
+# ---------------------------------------------------------------------------
+ACCENT = (0.29, 0.54, 1.0, 1.0)          # azul de marca
+ACCENT_DOWN = (0.20, 0.40, 0.85, 1.0)    # azul pulsado
+BG = (0.11, 0.115, 0.125, 1.0)           # fondo app
+CARD = (0.165, 0.17, 0.185, 1.0)         # tarjetas
+FIELD = (0.13, 0.135, 0.15, 1.0)         # inputs
+TEXT = (0.94, 0.95, 0.97, 1.0)
+SUB = (0.60, 0.63, 0.68, 1.0)
+DANGER = (0.86, 0.33, 0.32, 1.0)
+OK = (0.24, 0.78, 0.44, 1.0)
+R = dp(12)                                # radio de esquinas
 
 FONT = "Roboto"
-
 CONFIG_FILE = "vsol_config.json"
 LOG_FILE = "vsol_errors.log"
 
@@ -88,11 +97,16 @@ def norm_mac(m):
     return n.upper() if n else None
 
 
+def mac_key(m):
+    n = V._norm_mac(m)
+    return n.lower() if n else None
+
+
 # ---------------------------------------------------------------------------
 # Utilidades
 # ---------------------------------------------------------------------------
 class Worker(object):
-    """Ejecuta fn en un hilo y programa on_done en el hilo de UI."""
+    """Ejecuta fn en un hilo y programa on_done/on_error en el hilo de UI."""
 
     def __init__(self, fn, on_done, on_error=None):
         def run():
@@ -108,86 +122,253 @@ class Worker(object):
         threading.Thread(target=run, daemon=True).start()
 
 
-class InfoRow(BoxLayout):
-    def __init__(self, label, **kw):
-        super().__init__(orientation="horizontal", size_hint_y=None, height=dp(30), **kw)
-        self.add_widget(Label(text=label, size_hint_x=0.5, halign="left",
-                              color=SUB_HEX, font_name=FONT))
-        self.val = Label(text="-", halign="left", color=TEXT_HEX, font_name=FONT)
-        self.add_widget(self.val)
+def section(text, color=SUB):
+    return Label(text=text.upper(), bold=True, color=color, font_name=FONT,
+                 font_size=dp(11), halign="left", size_hint_y=None, height=dp(26))
 
 
-def sub_label(text):
-    return Label(text=text, color=SUB_HEX, size_hint_y=None, height=dp(24),
-                 font_name=FONT, font_size=dp(13))
+class Rounded(BoxLayout):
+    """BoxLayout con fondo redondeado (base de tarjetas)."""
 
-
-def section(title):
-    return Label(text=title, bold=True, color=TEXT_HEX, size_hint_y=None,
-                 height=dp(26), halign="left", font_name=FONT, font_size=dp(14))
-
-
-def make_button(text, on_release=None):
-    b = Button(text=text, font_name=FONT, background_color=(0.239, 0.494, 1.0, 1),
-               color=(1, 1, 1, 1), size_hint_y=None, height=dp(44))
-    if on_release:
-        b.bind(on_release=on_release)
-    return b
-
-
-class ColoredToggle(ToggleButton):
-    """Toggle con color solido: azul cuando esta activo (state=down)."""
-
-    ACTIVE = (0.239, 0.494, 1.0, 1)
-    INACTIVE = (0.2, 0.22, 0.25, 1)
-
-    def __init__(self, **kw):
-        kw.setdefault("font_name", FONT)
-        kw.setdefault("background_normal", "")
-        kw.setdefault("background_down", "")
-        kw.setdefault("color", TEXT_HEX)
+    def __init__(self, bg=CARD, radius=R, **kw):
         super().__init__(**kw)
-        self.bind(state=self._sync_color)
-        self._sync_color()
-
-    def _sync_color(self, *a):
-        down = self.state == "down"
-        self.background_color = self.ACTIVE if down else self.INACTIVE
-        self.color = (1, 1, 1, 1) if down else TEXT_HEX
-
-
-def card():
-    return Card()
-
-
-class Card(BoxLayout):
-    def __init__(self, **kw):
-        kw.setdefault("padding", dp(10))
-        kw.setdefault("spacing", dp(4))
-        super().__init__(**kw)
+        self._bg = bg
         with self.canvas.before:
-            self._col = Color(*BG_CARD)
-            self._rect = Rectangle()
+            self._col = Color(*bg)
+            self._rect = RoundedRectangle(radius=[radius, radius, radius, radius])
         self.bind(pos=self._redraw, size=self._redraw)
 
     def _redraw(self, *a):
         self._rect.pos = self.pos
         self._rect.size = self.size
 
+    def set_bg(self, c):
+        self._bg = c
+        self._col.rgba = c
+
+
+class Card(Rounded):
+    def __init__(self, **kw):
+        kw.setdefault("padding", [dp(12), dp(10)])
+        kw.setdefault("spacing", dp(4))
+        super().__init__(bg=CARD, **kw)
+
+
+def field(hint="", **kw):
+    """TextInput estilo app (fondo oscuro redondeado)."""
+    kw.setdefault("size_hint_y", None)
+    kw.setdefault("height", dp(48))
+    kw.setdefault("font_name", FONT)
+    kw.setdefault("hint_text_color", SUB)
+    kw.setdefault("foreground_color", TEXT)
+    kw.setdefault("cursor_color", ACCENT)
+    kw.setdefault("padding", [dp(12), dp(12), dp(12), dp(12)])
+    ti = TextInput(background_normal="", background_active="",
+                   hint_text=hint, **kw)
+    with ti.canvas.before:
+        ti._col = Color(*FIELD)
+        ti._rect = RoundedRectangle(radius=[R, R, R, R])
+
+    def _redraw(*a):
+        ti._rect.pos = ti.pos
+        ti._rect.size = ti.size
+
+    ti.bind(pos=_redraw, size=_redraw)
+    return ti
+
+
+def accented_btn(text, on_release=None, bg=ACCENT, **kw):
+    """Boton redondeado con fondo solido."""
+    kw.setdefault("size_hint_y", None)
+    kw.setdefault("height", dp(46))
+    kw.setdefault("font_name", FONT)
+    kw.setdefault("font_size", dp(14))
+    b = Button(text=text, background_normal="", background_down="",
+               color=(1, 1, 1, 1), **kw)
+    with b.canvas.before:
+        b._col = Color(*bg)
+        b._rect = RoundedRectangle(radius=[R, R, R, R])
+
+    def _redraw(*a):
+        b._rect.pos = b.pos
+        b._rect.size = b.size
+
+    b.bind(pos=_redraw, size=_redraw)
+    b._on_press = lambda *a: setattr(b._col, "rgba", ACCENT_DOWN if bg == ACCENT else bg)
+    b._on_release = lambda *a: setattr(b._col, "rgba", bg)
+    b.bind(on_press=b._on_press, on_release=b._on_release)
+    if on_release:
+        b.bind(on_release=on_release)
+    return b
+
+
+def quiet_btn(text, color=SUB, **kw):
+    """Boton sin fondo (texto de color)."""
+    kw.setdefault("font_name", FONT)
+    kw.setdefault("font_size", dp(13))
+    return Button(text=text, background_normal="", background_down="", color=color, **kw)
+
+
+def pw_field(parent, hint, default="", **kw):
+    """Input de contrasena con boton ojito (Mostrar/Ocultar)."""
+    ti = field(hint, text=default, password=True, **kw)
+    eye = quiet_btn("Mostrar", color=ACCENT, width=dp(96), size_hint=(None, 1))
+
+    def tog(*a):
+        ti.password = not ti.password
+        eye.text = "Ocultar" if not ti.password else "Mostrar"
+
+    eye.bind(on_release=tog)
+    row = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(6))
+    row.add_widget(ti)
+    row.add_widget(eye)
+    parent.add_widget(row)
+    return ti
+
 
 def confirm(app, title, text, on_ok):
     content = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(12))
-    content.add_widget(Label(text=text, color=TEXT_HEX, font_name=FONT))
-    btns = BoxLayout(orientation="horizontal", spacing=dp(12), size_hint_y=None, height=dp(48))
-    cancel = Button(text="Cancelar", font_name=FONT, background_color=(0.25, 0.27, 0.30, 1))
-    ok = Button(text="OK", font_name=FONT, background_color=(0.9, 0.3, 0.3, 1))
+    content.add_widget(Label(text=text, color=TEXT, font_name=FONT))
+    btns = BoxLayout(orientation="horizontal", spacing=dp(12),
+                     size_hint_y=None, height=dp(46))
+    cancel = accented_btn("Cancelar", bg=(0.28, 0.30, 0.34, 1))
+    ok = accented_btn("OK", bg=DANGER)
     btns.add_widget(cancel)
     btns.add_widget(ok)
     content.add_widget(btns)
-    pop = Popup(title=title, content=content, size_hint=(0.85, 0.4), auto_dismiss=True)
+    pop = Popup(title=title, content=content, size_hint=(0.9, 0.42), auto_dismiss=True)
     cancel.bind(on_release=pop.dismiss)
     ok.bind(on_release=lambda *a: (pop.dismiss(), on_ok() if on_ok else None))
     pop.open()
+
+
+def name_of(app, mac, fallback):
+    m = mac_key(mac)
+    return (app.names.get(m) if m else None) or fallback or ""
+
+
+# ---------------------------------------------------------------------------
+# Dispositivos: recopilacion + tarjeta + acciones
+# ---------------------------------------------------------------------------
+def collect_devices(app, wifi, details, dhcp):
+    """Une clientes wifi y DHCP en filas {mac, name, ip, red}, sin bloqueados."""
+    rows = []
+    seen = set()
+    for c in wifi:
+        k = mac_key(c.get("mac_addr", ""))
+        if not k or k in app.black() or k in seen:
+            continue
+        seen.add(k)
+        d = details.get(c.get("mac_addr", "").lower(), {})
+        rows.append({
+            "mac": k, "ip": d.get("ip", c.get("ip", "-")) or "-",
+            "red": d.get("linkSSID", "-") or "-",
+            "name": name_of(app, k, d.get("host", "") or ""),
+        })
+    for c in dhcp:
+        k = mac_key(c.get("macAddr", ""))
+        if not k or k in app.black() or k in seen:
+            continue
+        seen.add(k)
+        rows.append({
+            "mac": k, "ip": c.get("ipAddr", "-") or "-", "red": "-",
+            "name": name_of(app, k, c.get("nickname", "") or ""),
+        })
+    return rows
+
+
+def fetch_devices(app):
+    return collect_devices(app, app.api.get_wifi_clients(),
+                           app.api.get_client_details(),
+                           app.api.get_dhcp_clients())
+
+
+def render_devices(col, rows, rename_cb_maker, block_cb_maker):
+    col.clear_widgets()
+    if not rows:
+        col.add_widget(Label(text="Sin dispositivos", color=SUB,
+                             font_name=FONT, size_hint_y=None, height=dp(40)))
+        return
+    for r in rows:
+        d = DeviceCard(r["name"], r["mac"], r["ip"], r["red"],
+                       rename_cb_maker(r), block_cb_maker(r))
+        col.add_widget(d)
+
+
+class DeviceCard(Card):
+    """Tarjeta de dispositivo conectado: nombre, MAC, IP, red y acciones."""
+
+    def __init__(self, name, mac, ip, red, rename_cb, block_cb, **kw):
+        super().__init__(orientation="vertical", spacing=dp(4),
+                         size_hint_y=None, height=dp(102), **kw)
+        top = BoxLayout(orientation="horizontal", spacing=dp(6),
+                        size_hint_y=None, height=dp(26))
+        top.add_widget(Label(text=name or "-", bold=True, color=TEXT, font_name=FONT,
+                             font_size=dp(14), halign="left"))
+        self.add_widget(top)
+        self.add_widget(Label(text="%s  ·  %s  ·  %s" % (mac.upper(), ip, red),
+                              color=SUB, font_name=FONT, font_size=dp(12),
+                              halign="left", size_hint_y=None, height=dp(20)))
+        btns = BoxLayout(orientation="horizontal", spacing=dp(10),
+                         size_hint_y=None, height=dp(36))
+        rb = quiet_btn("Renombrar", color=ACCENT,
+                       size_hint=(None, 1), width=dp(130), font_size=dp(13))
+        rb.bind(on_release=lambda *a: rename_cb())
+        bb = quiet_btn("Bloquear", color=DANGER,
+                       size_hint=(None, 1), width=dp(120), font_size=dp(13))
+        bb.bind(on_release=lambda *a: block_cb())
+        btns.add_widget(rb)
+        btns.add_widget(bb)
+        self.add_widget(btns)
+
+
+def ask_rename(app, mac, current, on_done):
+    content = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(12))
+    content.add_widget(Label(text="Nombre para %s" % mac.upper(),
+                             color=TEXT, font_name=FONT))
+    ti = field("Nombre o alias", text=current)
+    content.add_widget(ti)
+    btns = BoxLayout(orientation="horizontal", spacing=dp(12),
+                     size_hint_y=None, height=dp(46))
+    cancel = accented_btn("Cancelar", bg=(0.28, 0.30, 0.34, 1))
+    ok = accented_btn("Guardar", bg=ACCENT)
+    btns.add_widget(cancel)
+    btns.add_widget(ok)
+    content.add_widget(btns)
+    pop = Popup(title="Renombrar", content=content, size_hint=(0.9, 0.5))
+
+    def save(*_):
+        name = ti.text.strip()
+        if name:
+            app.names[mac] = name
+        else:
+            app.names.pop(mac, None)
+        app.cfg["names"] = app.names
+        app.save_cfg()
+        pop.dismiss()
+        on_done(name)
+
+    cancel.bind(on_release=pop.dismiss)
+    ok.bind(on_release=save)
+    pop.open()
+    Clock.schedule_once(lambda dt: setattr(ti, "focus", True), 0.2)
+
+
+def block_device(app, mac, name, after):
+    norm = norm_mac(mac)
+    if not norm:
+        return
+    norm = norm.lower()
+
+    def act():
+        app.api.mac_filter_set_black_on()
+        app.api.mac_filter_add(norm, "0")
+
+    def done(resp):
+        after()
+
+    confirm(app, "Bloquear", "Bloquear %s (%s)?" % (name or "-", norm.upper()),
+            lambda: app.run_net(act, done))
 
 
 # ---------------------------------------------------------------------------
@@ -214,7 +395,7 @@ class VsolApp(App):
         return box
 
     def _build(self):
-        Window.clearcolor = BG_DARK
+        Window.clearcolor = BG
         self.api = None
         self.names = {}
         self.blacklist = set()
@@ -243,8 +424,7 @@ class VsolApp(App):
                                  size_hint_y=None, height=dp(26)))
         ti = TextInput(text=msg, readonly=False, font_size=dp(9), font_name=FONT)
         content.add_widget(ti)
-        close = Button(text="Cerrar", size_hint_y=None, height=dp(44),
-                       font_name=FONT, background_color=(0.239, 0.494, 1.0, 1))
+        close = accented_btn("Cerrar")
         content.add_widget(close)
         pop = Popup(title="VSOL Admin - Error", content=content,
                     size_hint=(0.95, 0.92))
@@ -340,31 +520,26 @@ class VsolApp(App):
 class LoginScreen(Screen):
     def __init__(self, **kw):
         super().__init__(**kw)
-        root = BoxLayout(orientation="vertical", padding=dp(24), spacing=dp(10))
-        root.add_widget(Label(text="VSOL Admin", font_name=FONT, bold=True,
-                              font_size=dp(24), color=TEXT_HEX, size_hint_y=None, height=dp(60)))
-        root.add_widget(sub_label("Administra tu ONT VSOL desde el movil"))
+        root = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(12))
+        brand = Rounded(bg=CARD, orientation="vertical", padding=[dp(16), dp(14)],
+                        spacing=dp(4), size_hint_y=None, height=dp(96))
+        brand.add_widget(Label(text="VSOL Admin", bold=True, font_name=FONT,
+                               font_size=dp(22), color=TEXT))
+        brand.add_widget(Label(text="Administra tu ONT VSOL desde el movil",
+                               font_name=FONT, font_size=dp(13), color=SUB))
+        root.add_widget(brand)
 
-        self.host_ti = self._f("IP del router", "192.168.1.8")
-        self.user_ti = self._f("Usuario", "admin")
-        self.pass_ti = TextInput(password=True, font_name=FONT, size_hint_y=None, height=dp(48),
-                                 hint_text="Contraseña")
-        self.err = Label(text="", color=(0.9, 0.35, 0.35, 1), font_name=FONT,
-                         size_hint_y=None, height=dp(36))
-
+        self.host_ti = field("IP del router", text="192.168.1.8")
+        self.user_ti = field("Usuario", text="admin")
         root.add_widget(self.host_ti)
         root.add_widget(self.user_ti)
-        root.add_widget(self.pass_ti)
+        self.pass_ti = pw_field(root, "Contraseña", "")
+        self.err = Label(text="", color=DANGER, size_hint_y=None, height=dp(30),
+                         font_name=FONT)
         root.add_widget(self.err)
-        root.add_widget(make_button("Conectar", self._go))
+        root.add_widget(accented_btn("Conectar", self._go))
         root.add_widget(Label(text="", size_hint_y=1))
         self.add_widget(root)
-
-    @staticmethod
-    def _f(hint, default):
-        ti = TextInput(text=default, hint_text=hint, font_name=FONT,
-                       size_hint_y=None, height=dp(48))
-        return ti
 
     def fill(self, cfg):
         self.host_ti.text = cfg.get("host", "192.168.1.8")
@@ -384,6 +559,16 @@ class MainScreen(Screen):
     def __init__(self, **kw):
         super().__init__(**kw)
         root = BoxLayout(orientation="vertical")
+
+        bar = BoxLayout(padding=[dp(14), dp(4), dp(14), dp(4)], spacing=dp(8),
+                        size_hint_y=None, height=dp(52))
+        bar.add_widget(Label(text="VSOL Admin", bold=True, color=TEXT,
+                             font_name=FONT, font_size=dp(17), halign="left"))
+        salir = quiet_btn("Salir", color=SUB, size_hint=(None, 1), width=dp(70))
+        salir.bind(on_release=lambda *a: App.get_running_app().do_logout())
+        bar.add_widget(salir)
+        root.add_widget(bar)
+
         self.inner = ScreenManager()
         self.estado = EstadoScreen(name="estado")
         self.dispositivos = DevicesScreen(name="disp")
@@ -394,19 +579,20 @@ class MainScreen(Screen):
             self.inner.add_widget(s)
         root.add_widget(self.inner)
 
-        nav = BoxLayout(orientation="horizontal", size_hint_y=None, height=dp(54))
+        nav = BoxLayout(orientation="horizontal", spacing=dp(6),
+                        padding=[dp(10), dp(6), dp(10), dp(10)],
+                        size_hint_y=None, height=dp(56))
         names = [("Estado", "estado"), ("Disp.", "disp"), ("Negra", "negra"),
                  ("WiFi", "wifi"), ("Más", "mas")]
         self.nav_btns = {}
         for text, key in names:
-            b = ColoredToggle(text=text, group="nav", font_name=FONT)
+            b = NavToggle(text=text, group="nav")
             b.bind(on_release=lambda _b, k=key: self.go_tab(k))
             nav.add_widget(b)
             self.nav_btns[key] = b
         root.add_widget(nav)
         self.add_widget(root)
         self.go_tab("estado")
-        self._update_interval = None
 
     def go_tab(self, key):
         self.inner.current = key
@@ -424,43 +610,90 @@ class MainScreen(Screen):
 
     def toast(self, msg):
         self.estado.set_msg(msg)
+        self.estado._clear_msg()
+
+
+class NavToggle(ToggleButton):
+    """Pestana de navegacion con fondo redondeado y estado activo en azul."""
+
+    def __init__(self, **kw):
+        kw.setdefault("font_name", FONT)
+        super().__init__(background_normal="", background_down="",
+                         color=SUB, **kw)
+        with self.canvas.before:
+            self._col = Color(*CARD)
+            self._rect = RoundedRectangle(radius=[dp(10), dp(10), dp(10), dp(10)])
+        self.bind(pos=self._redraw, size=self._redraw, state=self._sync)
+        self._sync()
+
+    def _redraw(self, *a):
+        self._rect.pos = self.pos
+        self._rect.size = self.size
+
+    def _sync(self, *a):
+        down = self.state == "down"
+        self._col.rgba = ACCENT if down else CARD
+        self.color = (1, 1, 1, 1) if down else SUB
 
 
 # ---------------------------------------------------------------------------
-# Estado
+# Estado (dashboard)
 # ---------------------------------------------------------------------------
 class EstadoScreen(Screen):
     def __init__(self, **kw):
         super().__init__(**kw)
-        root = BoxLayout(orientation="vertical", padding=dp(8))
-        self.msg = sub_label("")
+        root = BoxLayout(orientation="vertical", padding=dp(10))
+        self.msg = Label(text="", color=SUB, font_name=FONT, font_size=dp(12),
+                         size_hint_y=None, height=dp(24), halign="center")
         root.add_widget(self.msg)
         sv = ScrollView()
-        col = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(4), size_hint_y=None)
+        col = BoxLayout(orientation="vertical", spacing=dp(8), size_hint_y=None)
         col.bind(minimum_height=col.setter("height"))
+
         col.add_widget(section("Dispositivo"))
-        self.dev = [InfoRow("Modelo"), InfoRow("Firmware"), InfoRow("Uptime"),
-                    InfoRow("MAC")]
+        rc = Card()
+        self.dev = [InfoRow("Modelo"), InfoRow("Firmware"),
+                    InfoRow("Tiempo activo"), InfoRow("MAC")]
         for r in self.dev:
-            col.add_widget(r)
+            rc.add_widget(r)
+        col.add_widget(rc)
+
         col.add_widget(section("Optica PON"))
+        pc = Card()
         self.pon = [InfoRow("Temperatura"), InfoRow("Voltaje"),
                     InfoRow("Tx power"), InfoRow("Rx power")]
         for r in self.pon:
-            col.add_widget(r)
+            pc.add_widget(r)
+        col.add_widget(pc)
+
         col.add_widget(section("Recursos"))
-        self.res = [InfoRow("CPU %"), InfoRow("Mem %")]
-        for r in self.res:
-            col.add_widget(r)
+        msc = Card(orientation="horizontal", spacing=dp(12))
+        self.cpu_lbl = StatBox("CPU")
+        self.mem_lbl = StatBox("Mem")
+        msc.add_widget(self.cpu_lbl)
+        msc.add_widget(self.mem_lbl)
+        col.add_widget(msc)
+
+        col.add_widget(section("Dispositivos conectados"))
+        self.dcol = BoxLayout(orientation="vertical", spacing=dp(8), size_hint_y=None)
+        self.dcol.bind(minimum_height=self.dcol.setter("height"))
+        col.add_widget(self.dcol)
+
         col.add_widget(Label(size_hint_y=None, height=dp(8)))
         sv.add_widget(col)
         root.add_widget(sv)
-        root.add_widget(make_button("Refrescar estado", self._go_refresh))
+        root.add_widget(accented_btn("Refrescar estado", self._go_refresh))
         self.add_widget(root)
-        self._on_done = None
 
     def set_msg(self, txt):
         self.msg.text = txt
+
+    def _clear_msg(self):
+        try:
+            Clock.unschedule(self._msg_timer)
+        except Exception:
+            pass
+        self._msg_timer = Clock.schedule_once(lambda dt: self.set_msg(""), 3.5)
 
     def _go_refresh(self, *_):
         self.refresh()
@@ -474,40 +707,90 @@ class EstadoScreen(Screen):
 
         def work():
             return (app.api.get_device_info(), app.api.get_pon(),
-                    app.api.get_resource())
+                    app.api.get_resource(), fetch_devices(app))
 
         def done(res):
-            info, pon, resv = res
-            self.set_msg("")
+            info, pon, resv, rows = res
+            self.set_msg("%d dispositivo(s) conectado(s)" % len(rows))
             for row, key in zip(self.dev, ("devModel", "stVer", "web_uptime", "mac_address")):
-                row.val.text = (info.get(key) or "-")
+                row.val.text = (info.get(key) or "-").upper() if key == "mac_address" else (info.get(key) or "-")
             for row, key in zip(self.pon, ("temperature", "voltage", "tx-power", "rx-power")):
                 row.val.text = (pon.get(key) or "-")
-            for row, key in zip(self.res, ("cpUsage", "memUsage")):
-                row.val.text = (resv.get(key) or "-")
+            self.cpu_lbl.val.text = pct(resv.get("cpUsage"))
+            self.mem_lbl.val.text = pct(resv.get("memUsage"))
+            render_devices(self.dcol, rows,
+                           lambda r: (lambda: self._rename(r)),
+                           lambda r: (lambda: self._block(r)))
 
         def err(msg):
             self.set_msg("Error: %s" % msg)
 
         Worker(work, done, err)
 
+    def _rename(self, r):
+        app = App.get_running_app()
+        ask_rename(app, r["mac"], r["name"] or "",
+                   lambda *_a: (self.refresh(), app.main_screen.dispositivos.refresh()))
+
+    def _block(self, r):
+        app = App.get_running_app()
+        block_device(app, r["mac"], r["name"],
+                     lambda: (self.refresh(), app.main_screen.dispositivos.refresh(),
+                              app.main_screen.negra.refresh()))
+
+
+def pct(v):
+    v = v or "-"
+    if isinstance(v, str) and v.endswith("%"):
+        return v
+    return "%s%%" % v if v != "-" else "-"
+
+
+class StatBox(Card):
+    """Panel de recurso (CPU o memoria) con su valor grande."""
+
+    def __init__(self, label, **kw):
+        super().__init__(orientation="vertical", spacing=dp(2),
+                         size_hint_y=None, height=dp(68), **kw)
+        self.add_widget(Label(text=label, color=SUB, font_name=FONT,
+                              font_size=dp(11)))
+        self.val = Label(text="-", bold=True, color=TEXT, font_name=FONT,
+                         font_size=dp(20))
+        self.add_widget(self.val)
+
+
+class InfoRow(BoxLayout):
+    def __init__(self, label, **kw):
+        super().__init__(orientation="horizontal", size_hint_y=None, height=dp(28), **kw)
+        self.add_widget(Label(text=label, size_hint_x=0.5, halign="left",
+                              color=SUB, font_name=FONT))
+        self.val = Label(text="-", halign="left", color=TEXT, font_name=FONT)
+        self.add_widget(self.val)
+
 
 # ---------------------------------------------------------------------------
-# Dispositivos conectados
+# Dispositivos conectados (buscador + renombrar)
 # ---------------------------------------------------------------------------
 class DevicesScreen(Screen):
     def __init__(self, **kw):
         super().__init__(**kw)
-        root = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(6))
-        self.msg = sub_label("")
+        root = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(6))
+        self.msg = Label(text="", color=SUB, font_name=FONT, font_size=dp(12),
+                         size_hint_y=None, height=dp(22))
         root.add_widget(self.msg)
+        self.search_ti = field("Buscar por nombre, MAC o IP...")
+        self.search_ti.height = dp(44)
+        self.search_ti.bind(text=lambda *_a: self._rerender())
+        root.add_widget(self.search_ti)
         sv = ScrollView()
-        self.col = BoxLayout(orientation="vertical", spacing=dp(4), size_hint_y=None)
+        self.col = BoxLayout(orientation="vertical", spacing=dp(8),
+                             size_hint_y=None, padding=[0, dp(2)])
         self.col.bind(minimum_height=self.col.setter("height"))
         sv.add_widget(self.col)
         root.add_widget(sv)
-        root.add_widget(make_button("Actualizar", self._go))
+        root.add_widget(accented_btn("Actualizar", self._go))
         self.add_widget(root)
+        self.rows = []
 
     def _go(self, *_):
         self.refresh()
@@ -519,76 +802,45 @@ class DevicesScreen(Screen):
         self.set_msg("Cargando...")
 
         def work():
-            return (app.api.get_wifi_clients(), app.api.get_client_details(),
-                    app.api.get_dhcp_clients())
+            return fetch_devices(app)
 
-        def done(data):
-            wifi, details, dhcp = data
-            self.set_msg("")
-            self.col.clear_widgets()
-            for c in wifi:
-                mac = c.get("mac_addr", "").lower()
-                if norm_mac(mac) in app.black():
-                    continue
-                d = details.get(mac, {})
-                self._row(app, name_of(app, mac, d.get("host") or ""),
-                          mac, d.get("ip", c.get("ip", "-")) or "-",
-                          d.get("linkSSID", "-"))
-            for c in dhcp:
-                mac = c.get("macAddr", "").lower()
-                if norm_mac(mac) in app.black():
-                    continue
-                self._row(app, name_of(app, mac, c.get("nickname", "")),
-                          mac, c.get("ipAddr", "-"), "-")
-            if not self.col.children:
-                self.col.add_widget(Label(text="Sin dispositivos",
-                                          color=SUB_HEX, font_name=FONT))
+        def done(rows):
+            self.rows = rows
+            self.set_msg("%d dispositivo(s)" % len(rows))
+            self._rerender()
 
-        Worker(work, done)
+        def err(msg):
+            self.set_msg("Error: %s" % msg)
+
+        Worker(work, done, err)
 
     def set_msg(self, txt):
         self.msg.text = txt
 
-    def _row(self, app, name, mac, ip, red):
-        name = name or "-"
-        row = Card(orientation="vertical", spacing=dp(2),
-                   size_hint_y=None, height=dp(62))
-        top = BoxLayout(orientation="horizontal", spacing=dp(6))
-        top.add_widget(Label(text=name, bold=True, color=TEXT_HEX, font_name=FONT,
-                             halign="left"))
-        btn = Button(text="Bloquear", size_hint=(None, 1), width=dp(92),
-                     font_name=FONT, font_size=dp(12),
-                     background_color=(0.85, 0.3, 0.3, 1))
-        btn.bind(on_release=lambda _b, m=mac, n=name: self.block(app, m, n))
-        top.add_widget(btn)
-        row.add_widget(top)
-        row.add_widget(Label(text="%s  %s  %s" % (mac, ip, red), color=SUB_HEX,
-                             font_name=FONT, font_size=dp(12), halign="left"))
-        self.col.add_widget(row)
+    def _rerender(self):
+        q = self.search_ti.text.strip().lower()
+        filtered = [r for r in self.rows
+                    if not q or q in (r["name"] or "").lower()
+                    or q in r["mac"] or q in (r["ip"] or "").lower()]
+        render_devices(self.col, filtered,
+                       lambda r: (lambda: self._rename(r)),
+                       lambda r: (lambda: self._block(r)))
+        if self.rows and not filtered:
+            self.col.clear_widgets()
+            self.col.add_widget(Label(text="Sin coincidencias", color=SUB,
+                                      font_name=FONT, size_hint_y=None, height=dp(40)))
 
-    def block(self, app, mac, name):
-        norm = norm_mac(mac)
-        if not norm:
-            return
+    def _rename(self, r):
+        app = App.get_running_app()
+        ask_rename(app, r["mac"], r["name"] or "",
+                   lambda *_a: (self.refresh(), app.main_screen.estado.refresh(
+                       silent=True)))
 
-        def act():
-            app.api.mac_filter_set_black_on()
-            app.api.mac_filter_add(norm, "0")
-
-        def done(resp):
-            if name and name != "-":
-                app.names.setdefault(norm.lower(), name)
-                app.cfg["names"] = app.names
-                app.save_cfg()
-            app.main_screen.negra.refresh()
-            self.refresh()
-
-        confirm(app, "Bloquear", "Bloquear %s (%s)?" % (name, norm), lambda: app.run_net(act, done))
-
-
-def name_of(app, mac, fallback):
-    m = mac.lower()
-    return app.names.get(m) or fallback or ""
+    def _block(self, r):
+        app = App.get_running_app()
+        block_device(app, r["mac"], r["name"],
+                     lambda: (self.refresh(), app.main_screen.estado.refresh(
+                         silent=True), app.main_screen.negra.refresh()))
 
 
 # ---------------------------------------------------------------------------
@@ -597,24 +849,26 @@ def name_of(app, mac, fallback):
 class BlackScreen(Screen):
     def __init__(self, **kw):
         super().__init__(**kw)
-        root = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(6))
-        self.msg = sub_label("")
+        root = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(6))
+        self.msg = Label(text="", color=SUB, font_name=FONT, font_size=dp(12),
+                         size_hint_y=None, height=dp(22))
         root.add_widget(self.msg)
         sv = ScrollView()
-        self.col = BoxLayout(orientation="vertical", spacing=dp(4), size_hint_y=None)
+        self.col = BoxLayout(orientation="vertical", spacing=dp(8),
+                             size_hint_y=None, padding=[0, dp(2)])
         self.col.bind(minimum_height=self.col.setter("height"))
         sv.add_widget(self.col)
         root.add_widget(sv)
-        addrow = BoxLayout(orientation="horizontal", size_hint_y=None, height=dp(48), spacing=dp(6))
-        self.ti = TextInput(hint_text="MAC a bloquear (ej. aa:bb:cc:dd:ee:ff)",
-                            font_name=FONT, font_size=dp(12))
-        btn = Button(text="Añadir", size_hint=(None, 1), width=dp(110),
-                     font_name=FONT, background_color=(0.239, 0.494, 1.0, 1))
-        btn.bind(on_release=lambda _b: self.add_manual())
+        addrow = BoxLayout(orientation="horizontal", size_hint_y=None,
+                           height=dp(46), spacing=dp(6))
+        self.ti = field("MAC a bloquear (aa:bb:cc:dd:ee:ff)")
         addrow.add_widget(self.ti)
+        btn = accented_btn("Añadir", bg=ACCENT, size_hint=(None, 1), width=dp(110),
+                           height=dp(46))
+        btn.bind(on_release=lambda _b: self.add_manual())
         addrow.add_widget(btn)
         root.add_widget(addrow)
-        root.add_widget(make_button("Actualizar", self._go))
+        root.add_widget(accented_btn("Actualizar", self._go))
         self.add_widget(root)
 
     def _go(self, *_):
@@ -636,61 +890,70 @@ class BlackScreen(Screen):
             app.blacklist = set()
             for e in flt["entries"]:
                 if e.get("mac_type", "").strip() == "0":
-                    n = norm_mac(e.get("Mac_Addr", ""))
+                    n = mac_key(e.get("Mac_Addr", ""))
                     if n:
                         app.blacklist.add(n)
             mode = "lista negra" if flt.get("mode", "0") == "0" else "lista blanca"
             act = "ACTIVO" if flt["enable"] == "1" else "desactivado"
-            self.set_msg("Filtro MAC: %s (%s) - %d bloqueados" % (act, mode, len(app.blacklist)))
+            self.set_msg("Filtro MAC: %s (%s) - %d bloqueados"
+                         % (act, mode, len(app.blacklist)))
             self.col.clear_widgets()
             for e in flt["entries"]:
                 if e.get("mac_type", "").strip() != "0":
                     continue
-                m = e.get("Mac_Addr", "")
-                n = norm_mac(m)
-                if not n:
+                k = mac_key(e.get("Mac_Addr", ""))
+                if not k:
                     continue
+                n = k.upper()
                 row = Card(orientation="horizontal", spacing=dp(8),
-                           size_hint_y=None, height=dp(54))
-                row.add_widget(Label(text="%s\n%s" % (name_of(app, n.lower(), ""), n.upper()),
-                                     color=TEXT_HEX, font_name=FONT, font_size=dp(12),
+                           size_hint_y=None, height=dp(56))
+                nm = name_of(app, k, "")
+                row.add_widget(Label(text="%s\n%s" % (nm or "-", n),
+                                     color=TEXT, font_name=FONT, font_size=dp(12),
                                      halign="left"))
-                q = Button(text="Quitar", size_hint=(None, 1), width=dp(96),
-                           font_name=FONT, font_size=dp(12),
-                           background_color=(0.85, 0.3, 0.3, 1))
-                q.bind(on_release=lambda _b, mm=n: self.unblock(mm))
+                q = quiet_btn("Quitar", color=DANGER, size_hint=(None, 1),
+                              width=dp(96), font_size=dp(13))
+                q.bind(on_release=lambda _b, mm=k: self.unblock(mm))
                 row.add_widget(q)
                 self.col.add_widget(row)
+            if not self.col.children:
+                self.col.add_widget(Label(text="Sin bloqueados",
+                                          color=SUB, font_name=FONT,
+                                          size_hint_y=None, height=dp(40)))
 
         Worker(work, done)
 
     def add_manual(self):
         app = App.get_running_app()
-        norm = norm_mac(self.ti.text)
-        if not norm:
+        k = mac_key(self.ti.text)
+        if not k:
             self.set_msg("MAC no valida")
             return
         self.ti.text = ""
 
         def act():
             app.api.mac_filter_set_black_on()
-            return app.api.mac_filter_add(norm, "0")
+            return app.api.mac_filter_add(k, "0")
 
         def done(resp):
             self.refresh()
+            app.main_screen.estado.refresh(silent=True)
+            app.main_screen.dispositivos.refresh()
 
         app.run_net(act, done)
 
-    def unblock(self, norm):
+    def unblock(self, k):
         app = App.get_running_app()
 
         def act():
-            return app.api.mac_filter_remove(norm)
+            return app.api.mac_filter_remove(k)
 
         def done(resp):
             self.refresh()
+            app.main_screen.estado.refresh(silent=True)
+            app.main_screen.dispositivos.refresh()
 
-        confirm(app, "Desbloquear", "Quitar %s de la lista negra?" % norm,
+        confirm(app, "Desbloquear", "Quitar %s de la lista negra?" % k.upper(),
                 lambda: app.run_net(act, done))
 
 
@@ -701,25 +964,25 @@ class WifiScreen(Screen):
     def __init__(self, **kw):
         super().__init__(**kw)
         self.band = True   # True = 2.4G
-        root = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(8))
-        self.msg = sub_label("")
+        root = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(8))
+        self.msg = Label(text="", color=SUB, font_name=FONT, font_size=dp(12),
+                         size_hint_y=None, height=dp(22))
         root.add_widget(self.msg)
-        bands = BoxLayout(orientation="horizontal", size_hint_y=None, height=dp(48), spacing=dp(8))
-        self.b24 = ColoredToggle(text="2.4G", group="band", font_name=FONT)
-        self.b5 = ColoredToggle(text="5G", group="band", font_name=FONT)
-        self.b24.state = "down"
-        self.b24.bind(on_release=self._set_band24)
-        self.b5.bind(on_release=self._set_band5)
+        bands = BoxLayout(orientation="horizontal", size_hint_y=None,
+                          height=dp(44), spacing=dp(8))
+        self.b24 = NavToggle(text="2.4G", group="band")
+        self.b5 = NavToggle(text="5G", group="band")
         bands.add_widget(self.b24)
         bands.add_widget(self.b5)
+        self.b24.bind(on_release=self._set_band24)
+        self.b5.bind(on_release=self._set_band5)
         root.add_widget(bands)
-        self.ssid_ti = TextInput(hint_text="SSID", font_name=FONT, size_hint_y=None, height=dp(48))
-        self.psk_ti = TextInput(hint_text="Clave (PSK)", font_name=FONT, size_hint_y=None,
-                                height=dp(48), password=True)
+        self.b24.state = "down"
+
+        self.ssid_ti = field("SSID")
         root.add_widget(self.ssid_ti)
-        root.add_widget(self.psk_ti)
-        self.save_btn = make_button("Guardar cambios (reinicia la red)", self._go_save)
-        root.add_widget(self.save_btn)
+        self.psk_ti = pw_field(root, "Clave (PSK)")
+        root.add_widget(accented_btn("Guardar cambios (reinicia la red)", self._go_save))
         root.add_widget(Label(text="", size_hint_y=1))
         self.add_widget(root)
 
@@ -747,7 +1010,7 @@ class WifiScreen(Screen):
 
         def done(res):
             f, sec = res
-            self.set_msg("")
+            self.set_msg("Banda activa: %s" % ("2.4G" if self.band else "5G"))
             self.ssid_ti.text = f.get("ssid", "")
             self.psk_ti.text = sec.get("pskValue", "")
 
@@ -811,10 +1074,12 @@ class WifiScreen(Screen):
             return r1, r2
 
         def done(res):
-            self.set_msg("WiFi %s guardado. La red se cortara unos segundos." % tag)
+            self.set_msg("WiFi %s guardado. La red se cortara unos segundos."
+                         % tag)
 
-        confirm(app, "Guardar WiFi", "Aplicar cambios WiFi %s?\nLa red se reiniciara unos segundos." % tag,
-                lambda: app.run_net(work, done))
+        confirm(app, "Guardar WiFi",
+                "Aplicar cambios WiFi %s?\nLa red se reiniciara unos segundos."
+                % tag, lambda: app.run_net(work, done))
 
 
 # ---------------------------------------------------------------------------
@@ -824,11 +1089,11 @@ class MoreScreen(Screen):
     def __init__(self, **kw):
         super().__init__(**kw)
         root = BoxLayout(orientation="vertical", padding=dp(12), spacing=dp(10))
-        root.add_widget(Label(text="Opciones", bold=True, color=TEXT_HEX, font_size=dp(16),
-                              font_name=FONT, size_hint_y=None, height=dp(30)))
-        root.add_widget(make_button("Abrir web del router", self._web))
-        root.add_widget(make_button("Reiniciar router", self._reboot))
-        root.add_widget(make_button("Cerrar sesion", self._logout))
+        root.add_widget(Label(text="Opciones", bold=True, color=TEXT, font_size=dp(16),
+                              font_name=FONT, size_hint_y=None, height=dp(34)))
+        root.add_widget(accented_btn("Abrir web del router", self._web, bg=(0.20, 0.22, 0.25, 1)))
+        root.add_widget(accented_btn("Reiniciar router", self._reboot, bg=DANGER))
+        root.add_widget(accented_btn("Cerrar sesion", self._logout, bg=(0.30, 0.33, 0.38, 1)))
         root.add_widget(Label(text="", size_hint_y=1))
         self.add_widget(root)
 
@@ -851,7 +1116,8 @@ class MoreScreen(Screen):
 
     def _logout(self, *_):
         confirm(App.get_running_app(), "Cerrar sesion",
-                "Cerrar la sesion en el router?", App.get_running_app().do_logout)
+                "Cerrar la sesion en el router?",
+                App.get_running_app().do_logout)
 
 
 if __name__ == "__main__":
