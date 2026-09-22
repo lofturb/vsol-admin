@@ -17,10 +17,11 @@ from kivy.app import App
 from kivy.base import ExceptionHandler, ExceptionManager
 from kivy.clock import Clock
 from kivy.core.window import Window
-from kivy.graphics import Color, RoundedRectangle
+from kivy.graphics import Color, InstructionGroup, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
+from kivy.uix.checkbox import CheckBox
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.scrollview import ScrollView
@@ -152,10 +153,21 @@ class Card(Rounded):
         kw.setdefault("padding", [dp(12), dp(10)])
         kw.setdefault("spacing", dp(4))
         super().__init__(bg=CARD, **kw)
+        # Las tarjetas usan SIEMPRE su tamano de contenido (si no, en una
+        # columna con minimum_height se colapsan y sus hijos se superponen).
+        self.size_hint_y = None
+        self.height = self.minimum_height
+        self.bind(minimum_height=self.setter("height"))
 
 
 def field(hint="", **kw):
-    """TextInput estilo app (fondo oscuro redondeado)."""
+    """TextInput estilo app (fondo oscuro redondeado).
+
+    IMPORTANTE: el relleno se INSERTA al principio de canvas.before. El
+    TextInput de Kivy dibuja el texto con el color GL que deja el ultimo
+    Color de canvas.before (ver style.kv), asi que appender aqui rompe el
+    color de las letras (texto oscuro sobre fondo oscuro).
+    """
     kw.setdefault("size_hint_y", None)
     kw.setdefault("height", dp(48))
     kw.setdefault("font_name", FONT)
@@ -165,13 +177,15 @@ def field(hint="", **kw):
     kw.setdefault("padding", [dp(12), dp(12), dp(12), dp(12)])
     ti = TextInput(background_normal="", background_active="",
                    hint_text=hint, **kw)
-    with ti.canvas.before:
-        ti._col = Color(*FIELD)
-        ti._rect = RoundedRectangle(radius=[R, R, R, R])
+    grp = InstructionGroup()
+    with grp:
+        Color(*FIELD)
+        rect = RoundedRectangle(radius=[R, R, R, R], pos=ti.pos, size=ti.size)
+    ti.canvas.before.insert(0, grp)
 
     def _redraw(*a):
-        ti._rect.pos = ti.pos
-        ti._rect.size = ti.size
+        rect.pos = ti.pos
+        rect.size = ti.size
 
     ti.bind(pos=_redraw, size=_redraw)
     return ti
@@ -206,7 +220,39 @@ def quiet_btn(text, color=SUB, **kw):
     """Boton sin fondo (texto de color)."""
     kw.setdefault("font_name", FONT)
     kw.setdefault("font_size", dp(13))
-    return Button(text=text, background_normal="", background_down="", color=color, **kw)
+    return Button(text=text, background_normal="", background_down="",
+                  background_color=(0, 0, 0, 0), color=color, **kw)
+
+
+def dark_popup(title, content, size_hint=(0.9, 0.5)):
+    """Popup con marco oscuro (el Popup por defecto es blanco y las letras
+    claras no se leen)."""
+    frame = Rounded(bg=(0.145, 0.15, 0.165, 1), padding=dp(14),
+                    spacing=dp(6), orientation="vertical")
+    if title:
+        frame.add_widget(Label(text=title, bold=True, color=TEXT, font_name=FONT,
+                               size_hint_y=None, height=dp(28)))
+    frame.add_widget(content)
+    pop = Popup(title="", content=frame, size_hint=size_hint, auto_dismiss=True,
+                background="", background_color=(0, 0, 0, 0),
+                separator_color=(0, 0, 0, 0))
+    return pop
+
+
+def confirm(app, title, text, on_ok):
+    content = BoxLayout(orientation="vertical", padding=dp(0), spacing=dp(12))
+    content.add_widget(Label(text=text, color=TEXT, font_name=FONT))
+    btns = BoxLayout(orientation="horizontal", spacing=dp(12),
+                     size_hint_y=None, height=dp(46))
+    cancel = accented_btn("Cancelar", bg=(0.28, 0.30, 0.34, 1), size_hint_x=1)
+    ok = accented_btn("OK", bg=DANGER, size_hint_x=1)
+    btns.add_widget(cancel)
+    btns.add_widget(ok)
+    content.add_widget(btns)
+    pop = dark_popup(title, content, size_hint=(0.9, 0.42))
+    cancel.bind(on_release=pop.dismiss)
+    ok.bind(on_release=lambda *a: (pop.dismiss(), on_ok() if on_ok else None))
+    pop.open()
 
 
 def pw_field(parent, hint, default="", **kw):
@@ -224,22 +270,6 @@ def pw_field(parent, hint, default="", **kw):
     row.add_widget(eye)
     parent.add_widget(row)
     return ti
-
-
-def confirm(app, title, text, on_ok):
-    content = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(12))
-    content.add_widget(Label(text=text, color=TEXT, font_name=FONT))
-    btns = BoxLayout(orientation="horizontal", spacing=dp(12),
-                     size_hint_y=None, height=dp(46))
-    cancel = accented_btn("Cancelar", bg=(0.28, 0.30, 0.34, 1))
-    ok = accented_btn("OK", bg=DANGER)
-    btns.add_widget(cancel)
-    btns.add_widget(ok)
-    content.add_widget(btns)
-    pop = Popup(title=title, content=content, size_hint=(0.9, 0.42), auto_dismiss=True)
-    cancel.bind(on_release=pop.dismiss)
-    ok.bind(on_release=lambda *a: (pop.dismiss(), on_ok() if on_ok else None))
-    pop.open()
 
 
 def name_of(app, mac, fallback):
@@ -299,8 +329,7 @@ class DeviceCard(Card):
     """Tarjeta de dispositivo conectado: nombre, MAC, IP, red y acciones."""
 
     def __init__(self, name, mac, ip, red, rename_cb, block_cb, **kw):
-        super().__init__(orientation="vertical", spacing=dp(4),
-                         size_hint_y=None, height=dp(102), **kw)
+        super().__init__(orientation="vertical", spacing=dp(4), **kw)
         top = BoxLayout(orientation="horizontal", spacing=dp(6),
                         size_hint_y=None, height=dp(26))
         top.add_widget(Label(text=name or "-", bold=True, color=TEXT, font_name=FONT,
@@ -323,19 +352,19 @@ class DeviceCard(Card):
 
 
 def ask_rename(app, mac, current, on_done):
-    content = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(12))
+    content = BoxLayout(orientation="vertical", spacing=dp(12))
     content.add_widget(Label(text="Nombre para %s" % mac.upper(),
                              color=TEXT, font_name=FONT))
     ti = field("Nombre o alias", text=current)
     content.add_widget(ti)
     btns = BoxLayout(orientation="horizontal", spacing=dp(12),
                      size_hint_y=None, height=dp(46))
-    cancel = accented_btn("Cancelar", bg=(0.28, 0.30, 0.34, 1))
-    ok = accented_btn("Guardar", bg=ACCENT)
+    cancel = accented_btn("Cancelar", bg=(0.28, 0.30, 0.34, 1), size_hint_x=1)
+    ok = accented_btn("Guardar", bg=ACCENT, size_hint_x=1)
     btns.add_widget(cancel)
     btns.add_widget(ok)
     content.add_widget(btns)
-    pop = Popup(title="Renombrar", content=content, size_hint=(0.9, 0.5))
+    pop = dark_popup("Renombrar", content, size_hint=(0.9, 0.5))
 
     def save(*_):
         name = ti.text.strip()
@@ -419,30 +448,31 @@ class VsolApp(App):
             pass
 
     def show_error(self, msg):
-        content = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(8))
+        content = BoxLayout(orientation="vertical", spacing=dp(8))
         content.add_widget(Label(text="Ocurrio un error:", color=(1, 0.4, 0.4, 1),
                                  size_hint_y=None, height=dp(26)))
         ti = TextInput(text=msg, readonly=False, font_size=dp(9), font_name=FONT)
         content.add_widget(ti)
         close = accented_btn("Cerrar")
         content.add_widget(close)
-        pop = Popup(title="VSOL Admin - Error", content=content,
-                    size_hint=(0.95, 0.92))
+        pop = dark_popup("VSOL Admin - Error", content, size_hint=(0.95, 0.92))
         close.bind(on_release=pop.dismiss)
         pop.open()
 
     def on_start(self):
+        self.login_screen.remember.active = bool(self.cfg.get("save_creds", True))
         if self.cfg.get("host"):
             self.login_screen.fill(self.cfg)
 
     # ---- config ----
     def load_cfg(self):
-        self.cfg = {"host": "192.168.1.8", "user": "admin", "password": "", "names": {}}
+        self.cfg = {"host": "192.168.1.8", "user": "admin", "password": "",
+                    "names": {}, "save_creds": True}
         try:
             with open(self.cfg_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, dict):
-                for k in ("host", "user", "password", "names"):
+                for k in ("host", "user", "password", "names", "save_creds"):
                     if k in data:
                         self.cfg[k] = data[k]
         except (OSError, ValueError):
@@ -457,7 +487,7 @@ class VsolApp(App):
             pass
 
     # ---- login ----
-    def do_login(self, host, user, password, err_label):
+    def do_login(self, host, user, password, err_label, remember):
         err_label.text = "Conectando..."
 
         def work():
@@ -472,10 +502,12 @@ class VsolApp(App):
             self.cfg.update({
                 "host": host.strip(),
                 "user": user,
-                "password": password,
+                "password": password if remember else "",
                 "names": self.names,
+                "save_creds": remember,
             })
             self.save_cfg()
+            self.login_screen.remember.active = remember
             self.main_screen.on_logged_in(info)
             self.sm.current = "main"
             self.start_auto_refresh()
@@ -534,6 +566,14 @@ class LoginScreen(Screen):
         root.add_widget(self.host_ti)
         root.add_widget(self.user_ti)
         self.pass_ti = pw_field(root, "Contraseña", "")
+        remrow = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(34))
+        self.remember = CheckBox(active=True, color=ACCENT,
+                                 size_hint=(None, 1), width=dp(40))
+        remrow.add_widget(self.remember)
+        remrow.add_widget(Label(text="Recordar usuario y contraseña en este movil",
+                                color=SUB, font_name=FONT, font_size=dp(12),
+                                halign="left"))
+        root.add_widget(remrow)
         self.err = Label(text="", color=DANGER, size_hint_y=None, height=dp(30),
                          font_name=FONT)
         root.add_widget(self.err)
@@ -544,12 +584,14 @@ class LoginScreen(Screen):
     def fill(self, cfg):
         self.host_ti.text = cfg.get("host", "192.168.1.8")
         self.user_ti.text = cfg.get("user", "admin")
-        self.pass_ti.text = cfg.get("password", "")
+        self.remember.active = bool(cfg.get("save_creds", True))
+        self.pass_ti.text = (cfg.get("password", "")
+                             if cfg.get("save_creds", True) else "")
 
     def _go(self, *_):
         app = App.get_running_app()
         app.do_login(self.host_ti.text, self.user_ti.text,
-                     self.pass_ti.text, self.err)
+                     self.pass_ti.text, self.err, self.remember.active)
 
 
 # ---------------------------------------------------------------------------
@@ -750,8 +792,7 @@ class StatBox(Card):
     """Panel de recurso (CPU o memoria) con su valor grande."""
 
     def __init__(self, label, **kw):
-        super().__init__(orientation="vertical", spacing=dp(2),
-                         size_hint_y=None, height=dp(68), **kw)
+        super().__init__(orientation="vertical", spacing=dp(2), **kw)
         self.add_widget(Label(text=label, color=SUB, font_name=FONT,
                               font_size=dp(11)))
         self.val = Label(text="-", bold=True, color=TEXT, font_name=FONT,
@@ -905,12 +946,12 @@ class BlackScreen(Screen):
                 if not k:
                     continue
                 n = k.upper()
-                row = Card(orientation="horizontal", spacing=dp(8),
-                           size_hint_y=None, height=dp(56))
+                row = Card(orientation="horizontal", spacing=dp(8))
                 nm = name_of(app, k, "")
                 row.add_widget(Label(text="%s\n%s" % (nm or "-", n),
                                      color=TEXT, font_name=FONT, font_size=dp(12),
-                                     halign="left"))
+                                     halign="left", size_hint_y=None,
+                                     height=dp(48)))
                 q = quiet_btn("Quitar", color=DANGER, size_hint=(None, 1),
                               width=dp(96), font_size=dp(13))
                 q.bind(on_release=lambda _b, mm=k: self.unblock(mm))
