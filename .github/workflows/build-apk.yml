@@ -30,6 +30,8 @@ jobs:
 
       - name: Compilar APK
         working-directory: movil
+        env:
+          JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
         run: |
           buildozer -v android debug
 
